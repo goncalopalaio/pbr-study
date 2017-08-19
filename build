@@ -1,2 +1,2 @@
 #!/bin/bash
-gcc main.c -Iinclude -lglfw -lm
+g++ main.c -ggdb  -Wno-deprecated include/libassimp.3.1.1.dylib -Iinclude -lglfw -lm
