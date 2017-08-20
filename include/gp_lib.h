@@ -185,6 +185,8 @@ aiProcess_OptimizeMeshes);
 		glVertexAttribPointer(0,3,GL_FLOAT, GL_FALSE, 0, NULL);
 		glEnableVertexAttribArray(0);
 
+		printf("VertexAttribArray 0 -> Positions\n");
+
 		// Free temporary local memory;
 		free(points);
 	}
@@ -202,6 +204,8 @@ aiProcess_OptimizeMeshes);
 		glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
 		glEnableVertexAttribArray(1);
 
+		printf("VertexAttribArray 1 -> Normals\n");
+
 		// Free temporary local memory;
 		free(normals);
 	}
@@ -218,6 +222,8 @@ aiProcess_OptimizeMeshes);
 
 		glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, 0, NULL);
 		glEnableVertexAttribArray(2);
+
+		printf("VertexAttribArray 2 -> TextureCoords\n");
 
 		// Free temporary local memory;
 		free(tex_coords);
@@ -267,13 +273,13 @@ int compile_shader_program(const char* str_vert_shader, const char* str_frag_sha
     vert_shader = compile_shader(GL_VERTEX_SHADER, str_vert_shader);
     if(vert_shader == 0) {
         gp_log("Error compiling vert shader");
-        return 1;
+        return 0;
     }
 
     frag_shader = compile_shader(GL_FRAGMENT_SHADER, str_frag_shader);
     if(frag_shader == 0) {
         gp_log("Error compiling frag shader");
-        return 1;
+        return 0;
     }
 
     gp_log("Creating shader program");
@@ -283,17 +289,17 @@ int compile_shader_program(const char* str_vert_shader, const char* str_frag_sha
     glAttachShader(prog_object, frag_shader);
 
     if (attrib_name_0 != NULL) {
-        gp_log("Binding attrib 0");
+        printf("Binding attrib 0 ---> %s\n", attrib_name_0);
         glBindAttribLocation(prog_object, 0, attrib_name_0);
     }
 
     if (attrib_name_1 != NULL) {
-        gp_log("Binding attrib 1");
+        printf("Binding attrib 1 ---> %s\n", attrib_name_1);
         glBindAttribLocation(prog_object, 1, attrib_name_1);
     }
 
     if (attrib_name_2 != NULL) {
-        gp_log("Binding attrib 2");
+        printf("Binding attrib 2 ---> %s\n", attrib_name_2);
         glBindAttribLocation(prog_object, 2, attrib_name_2);
     }
 
@@ -301,6 +307,30 @@ int compile_shader_program(const char* str_vert_shader, const char* str_frag_sha
     glLinkProgram(prog_object);
 
     return prog_object;
+}
+
+////////////////////////////////////////////////////
+// file stuff
+
+char* gp_read_entire_file_alloc(const char *filename) {
+    printf("Loading %s\n", filename);
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        printf("Error: Could not load file: %s\n", filename);
+        return NULL;
+    }
+
+    fseek(f, 0, SEEK_END);
+    long fsize = ftell(f);
+    fseek(f, 0, SEEK_SET);
+    printf("Filesize = %d\n", (int)fsize);
+
+    char *string = (char*)malloc(fsize + 1);
+    fread(string, fsize, 1, f);
+    string[fsize] = '\0';
+    fclose(f);
+
+    return string;
 }
 
 ////////////////////////////////////////////////////
@@ -426,3 +456,122 @@ struct cpu_timestamp {
 
 // abuse c++ destructors so it is only required to define this at the start of the method
 #define TIMED_BLOCK struct cpu_timestamp temp_cpu_timestamp(__LINE__, __FILE__, __FUNCTION__)
+
+
+////////////////////////////////////////////////////
+// file watching stuff
+
+// @note this is really messy for now and only supports osx
+
+#ifdef GP_INCLUDE_FILEWATCHER
+	
+	typedef struct FileWatcherInfo{
+		int files_changed;
+		char* latest_filename;
+	}FileWatcherInfo;
+
+	FileWatcherInfo* filewatcher_context;
+
+	void start_filewatcher(char* folder);
+	void stop_filewatcher();
+	int files_changed_filewatcher();
+
+	#ifdef __MACH__
+		#include <CoreServices/CoreServices.h>
+		FSEventStreamRef stream;
+
+		void loop_filewatcher(
+		    ConstFSEventStreamRef streamRef,
+		    void *clientCallBackInfo,
+		    size_t numEvents,
+		    void *eventPaths,
+		    const FSEventStreamEventFlags eventFlags[],
+		    const FSEventStreamEventId eventIds[])
+		{
+			int i;
+			char **paths = (char **)eventPaths;
+
+			// printf("Callback called\n");
+			for (i=0; i<numEvents; i++) {
+				int count;
+				/* flags are unsigned long, IDs are uint64_t */
+				printf("Change %llu in %s, flags %u\n", eventIds[i], paths[i], eventFlags[i]);
+			}
+
+			if (numEvents > 0) {
+				if (filewatcher_context != NULL) {
+					filewatcher_context->files_changed = numEvents;
+					sprintf(filewatcher_context->latest_filename, "%s", paths[0]);
+				} else {
+					printf("filewatcher_context is NULL ???\n");
+				}	
+			} else {
+				filewatcher_context->files_changed = 0;
+				printf("loop_filewatcher called but no events ???\n");
+			}
+		}
+
+		void stop_filewatcher() {
+			printf("Stop_filewatcher: stop\n");
+			FSEventStreamStop(stream);
+			FSEventStreamInvalidate(stream);
+			FSEventStreamRelease(stream);
+
+			free(filewatcher_context->latest_filename);
+			free(filewatcher_context);
+		}
+
+		/*
+		 * https://developer.apple.com/library/content/documentation/Darwin/Conceptual/FSEvents_ProgGuide/UsingtheFSEventsFramework/UsingtheFSEventsFramework.html#//apple_ref/doc/uid/TP40005289-CH4-DontLinkElementID_11
+		 */
+		void start_filewatcher(char* folder) {
+			printf("Start_filewatcher: start\n");
+			filewatcher_context = (FileWatcherInfo*) malloc(sizeof(FileWatcherInfo));
+ 			filewatcher_context->files_changed = 0;
+ 			filewatcher_context->latest_filename = (char*) malloc(200 * sizeof(char));
+
+
+ 			
+ 			/* Define variables and create a CFArray object containing
+		       CFString objects containing paths to watch.
+		     */
+		    CFStringRef mypath = CFStringCreateWithFormat(NULL, NULL, CFSTR("%s"), folder);
+		    // @note only supporting one folder for now
+		    CFArrayRef pathsToWatch = CFArrayCreate(NULL, (const void **)&mypath, 1, NULL);
+
+		    CFAbsoluteTime latency = 0.3; /* Latency in seconds */
+		 	FSEventStreamContext* stream_context = NULL;
+		    /* Create the stream, passing in a callback */
+		    stream = FSEventStreamCreate(NULL,
+		        &loop_filewatcher,
+		        stream_context, // @note There's a way to pass information through this?
+		        pathsToWatch,
+		        kFSEventStreamEventIdSinceNow, /* Or a previous event ID */
+		        latency,
+		        kFSEventStreamCreateFlagFileEvents//kFSEventStreamCreateFlagNone /* Flags explained in reference */
+		    );
+
+		    /* Create the stream before calling this. */
+		    FSEventStreamScheduleWithRunLoop(stream, CFRunLoopGetCurrent(), kCFRunLoopDefaultMode);
+
+		    // Start stream
+		    bool success = FSEventStreamStart(stream);
+		    printf("Start_filewatcher: file event stream started? %d\n", success);
+		}
+
+	#else
+		void start_filewatcher() {
+			printf("\n\n\n\n File watcher not implemented for this platform\n\n\n\n ");
+		}
+		void stop_filewatcher() {
+			printf("\n\n\n\n File watcher not implemented for this platform\n\n\n\n ");
+		}
+		int files_changed_filewatcher() {
+			printf("\n\n\n\n File watcher not implemented for this platform\n\n\n\n ");	
+		}
+	#endif
+
+#endif
+
+
+

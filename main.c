@@ -9,10 +9,14 @@
 //#define GLFW_INCLUDE_GLCOREARB
 #include <GLFW/glfw3.h>
 
+#define GP_INCLUDE_FILEWATCHER
 #include "include/gp_lib.h"
 
 #define STB_TRUETYPE_IMPLEMENTATION
 #include "stb_truetype.h"
+
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb_image.h"
 
 #define MV_EASY_FONT_IMPLEMENTATION
 #include "mv_easy_font.h"
@@ -34,13 +38,13 @@
 
 #define WIN GLFWwindow
 
-int k_left_shift_switch = 0;
 int k_left_counter = 0;
 int k_down_counter = 0;
 int k_right_counter = 0;
 int k_a_counter = 0;
 int k_s_counter = 0;
 int k_d_counter = 0;
+int k_r_switch = 1;
 
 void windowclose_callback(WIN * window);
 void windowsize_callback(WIN * window, int width, int height);
@@ -60,9 +64,29 @@ typedef struct Camera {
     float3 up;
 } Camera;
 
+void load_texture(const char* file, GLuint* tex) {
+	unsigned char * data;
+    int width = 256;
+    int height = 256;
+    int bitdepth = 4;
+    GLuint texture;
+    data = stbi_load(file, &width, &height, &bitdepth, 0);
+    // Create one OpenGL texture
+    glGenTextures(1, tex);
+
+    glBindTexture(GL_TEXTURE_2D, *tex);
+
+    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
+
+
+    free(data);
+}
+
 void update_camera(Camera* cam, float* view_matrix) {
-    set_float3(&(cam->position), k_left_counter+15 ,k_down_counter+15, k_right_counter+15);
-    set_float3(&(cam->look_at_point), k_a_counter + 0, k_s_counter + 10, k_d_counter + 0);
+    set_float3(&(cam->position), k_left_counter+1, k_down_counter+0, k_right_counter+1);
+    set_float3(&(cam->look_at_point), k_a_counter + 0, k_s_counter + 0, k_d_counter + 0);
 
 	set_float3(&(cam->direction), 
 									cam->look_at_point.x - cam->position.x,
@@ -115,11 +139,15 @@ int init(int w, int h) {
     }
 
 	mv_ef_init("extra/Inconsolata-Regular.ttf", 48.0, NULL, NULL);
+
+	start_filewatcher("shaders/");
+
     return 0;
 }
 
 void teardown() {
 	log("Exiting program\n");
+	stop_filewatcher();
 	glfwTerminate();
 }
 
@@ -127,13 +155,25 @@ BOOL should_exit_gameplay_loop() {
 	return glfwWindowShouldClose(window);
 }
 
+GLuint load_model_shaders() {
+	char* str_vert = gp_read_entire_file_alloc("shaders/model_vertex.glsl");
+	char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment.glsl");
+    GLuint program = compile_shader_program(str_vert,str_frag,
+    													  "position", "normal", "uv");
+    free(str_vert);
+    free(str_frag);
+
+    return program;
+}
 void gameplay_loop(int w, int h) {
 	char* debug_string = (char*) malloc(200 * sizeof(char));
 
 	GLuint model_vao;
     int model_point_count = 0;
-    assert(load_mesh("models/cat.obj", &model_vao, &model_point_count));
+    assert(load_mesh("models/cube.obj", &model_vao, &model_point_count));
 
+    GLuint model_texture;
+    load_texture("textures/texture_3.png", &model_texture);
 
 	float view_matrix[] = M_MAT4_IDENTITY();
 	float projection_matrix[] = M_MAT4_IDENTITY();
@@ -145,39 +185,19 @@ void gameplay_loop(int w, int h) {
     Camera* camera = (Camera*) malloc(sizeof(Camera));
    	update_camera(camera, view_matrix);
 
-    char str_vert_shader[] =
-		"#version 150\n"
-		"in vec3 position;\n"
-		"uniform mat4 u_view_matrix;"
-		"uniform mat4 u_model_matrix;"
-        "uniform mat4 u_projection_matrix;"
-		"void main(){\n"
-		"gl_Position =  u_projection_matrix * u_view_matrix * u_model_matrix * vec4(position, 1.0);\n"
-		"}\n";
-
-    char str_frag_shader[] =
-		"#version 150\n"
-		"out vec4 frag_color;\n"
-		"void main() {\n"
-		"frag_color = vec4(0.9,0.5,0.3,1.0);\n"
-		"}\n";
-
 	float model_matrix[] = M_MAT4_IDENTITY();
 	float model_scale_matrix[] = M_MAT4_IDENTITY();
 	float model_rotation_matrix[] = M_MAT4_IDENTITY();
 	float3 model_scale;
-	set_float3(&model_scale, 0.03,0.03,0.03);
+	set_float3(&model_scale, 1,1,1);
 	m_mat4_scale(model_scale_matrix, &model_scale);
 
-
-
-    GLuint model_program = compile_shader_program(str_vert_shader,
-    													  str_frag_shader,
-    													  "position", "uv", "normal");
+	GLuint model_program = load_model_shaders();
 
 	GLuint loc_model_matrix = glGetUniformLocation(model_program, "u_model_matrix");
     GLuint loc_view_matrix = glGetUniformLocation(model_program, "u_view_matrix");
     GLuint loc_projecion_matrix = glGetUniformLocation(model_program, "u_projection_matrix");
+    GLuint loc_texture_0 = glGetUniformLocation(model_program, "u_texture");
 
 	glEnable(GL_DEPTH_TEST);
     glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
@@ -189,11 +209,16 @@ void gameplay_loop(int w, int h) {
 
     	update_camera(camera, view_matrix);
 
-		m_mat4_rotation_axis(model_rotation_matrix, &Y_AXIS, 0.01 * frame);		
+		m_mat4_rotation_axis(model_rotation_matrix, &Y_AXIS, 0.001 * frame);		
 		m_mat4_mul(model_matrix, model_scale_matrix, model_rotation_matrix);
 
     	{
 			glUseProgram(model_program);
+
+			glActiveTexture(GL_TEXTURE0);
+			glBindTexture(GL_TEXTURE_2D, model_texture);
+			glUniform1i(loc_texture_0, 0); // note: not being used
+
 			glUniformMatrix4fv(loc_model_matrix, 1, GL_FALSE, model_matrix);
 			glUniformMatrix4fv(loc_view_matrix, 1, GL_FALSE, view_matrix);
 			glUniformMatrix4fv(loc_projecion_matrix, 1, GL_FALSE, projection_matrix);
@@ -205,13 +230,25 @@ void gameplay_loop(int w, int h) {
 	    	float offset[2] = {15.0, -15.0};
 			float font_size = 18.0;
 			float width, height;
-			sprintf(debug_string, "Look at the cat\n%.1f %.1f %.1f --> %.1f %.1f %.1f",
-																 camera->position.x,
-															     camera->position.y,
-															     camera->position.z,
-																 camera->look_at_point.x,
-																 camera->look_at_point.y,
-																 camera->look_at_point.z);
+			//sprintf(debug_string, "Look at the cat\n%.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
+			//sprintf(debug_string, "Look at the cat\n%.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
+			sprintf(debug_string, "%s", "");
+			if (filewatcher_context->files_changed > 0) {
+				sprintf(debug_string, "File changed: %d \nlatest_filename %s",filewatcher_context->files_changed, filewatcher_context->latest_filename);
+				filewatcher_context->files_changed = 0;
+
+				printf("Recompiling model shader\n");
+
+				GLuint new_program = load_model_shaders();
+				if (new_program != 0) {
+					printf("Replacing model shaders\n");
+					model_program = new_program;
+				} else {
+					printf("\n\n\n\nERROR replacing shaders\n Keeping the old one for now\n\n\n\n");
+
+				}
+
+			}
 			mv_ef_string_dimensions(debug_string, &width, &height, font_size); // for potential alignment
 			mv_ef_draw(debug_string, NULL, offset, font_size);
     	}
@@ -234,9 +271,12 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	BOOL pressed = (action == GLFW_PRESS);
 	BOOL released = (action == GLFW_RELEASE);
 
-	int increment = 10;
+	int increment = 10 * k_r_switch;
 
     switch(key) {
+    	case GLFW_KEY_R:
+    		k_r_switch = 1 - k_r_switch;
+    		break;
         case GLFW_KEY_RIGHT:
         	log("GLFW_KEY_RIGHT\n");
         	k_right_counter+=increment;
@@ -265,7 +305,7 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
         	k_d_counter+=increment;
         break;
         default:
-        	log("key %d not mapped", key);
+        	log("key %d not mapped directly\n", key);
     }
 
 	if(key == GLFW_KEY_ESCAPE || key == GLFW_KEY_Q) {
@@ -292,9 +332,7 @@ int main(int argc, char const *argv[]) {
 	return 0;
 }
 
-
-void frame_timer()
-{
+void frame_timer() {
     static double t1 = 0.0;
     static double avg_dt = 0.0;
     static double avg_dt2 = 0.0;
