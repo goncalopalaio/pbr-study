@@ -46,6 +46,24 @@ void set_float3(float* arr, float3 v) {
 	arr[2] = v.z;
 }
 
+void mul_scalar(float3* v, float val) {
+	v->x *=val;
+	v->y *=val;
+	v->z *=val; 
+}
+
+void sub_float3_inplace(float3* dest, float3* other) {
+	dest->x -= other->x;
+	dest->y -= other->y;
+	dest->z -= other->z;
+}
+
+void copy_to_arr(float* arr, float3* v) {
+	arr[0] = v->x;
+	arr[1] = v->y;
+	arr[2] = v->z;
+}
+
 float* malloc_mat4_identity() {
 	float* matrix = (float*) malloc(16 * sizeof(float));
 	m_mat4_identity(matrix);
@@ -104,7 +122,8 @@ int load_mesh(const char* file_name, GLuint* vao, int* point_count) {
 	const aiScene* scene = aiImportFile(file_name, 
 aiProcess_Triangulate|
 aiProcess_ConvertToLeftHanded|
-aiProcess_OptimizeMeshes);
+aiProcess_OptimizeMeshes|
+aiProcess_CalcTangentSpace);
 	
 	if(!scene) {
 		printf("Error reading mesh %s \n", file_name);
@@ -136,6 +155,8 @@ aiProcess_OptimizeMeshes);
 	GLfloat* points = NULL;
 	GLfloat* normals = NULL;
 	GLfloat* tex_coords = NULL;
+	GLfloat* tangents = NULL;
+	
 
 	if (mesh->HasPositions()){
 		printf("Loading positions\n");
@@ -167,6 +188,60 @@ aiProcess_OptimizeMeshes);
 			const aiVector3D* vt = &(mesh->mTextureCoords[0][i]);
 			tex_coords[i * 2 + 0] = (GLfloat)vt->x;
 			tex_coords[i * 2 + 1] = (GLfloat)vt->y;
+		}
+	}
+
+	if (mesh->HasTangentsAndBitangents()) {
+		printf("Loading TangentsAndBitangents???\n");
+		tangents = (GLfloat*) malloc(*point_count * 4 * sizeof(GLfloat));
+		float3 t;
+		float3 b;
+		float3 n;
+
+		for (int i = 0; i < *point_count; ++i) {
+			const aiVector3D* tangent = &(mesh->mTangents[i]);
+			const aiVector3D* bitangent = &(mesh->mBitangents[i]);
+			const aiVector3D* normal = &(mesh->mNormals[i]);
+
+			set_float3(&t, tangent->x, tangent->y, tangent->z);
+			set_float3(&b, bitangent->x, bitangent->y, bitangent->z);
+			set_float3(&n, normal->x, normal->y, normal->z);
+
+
+			// Orthogonalize and normalise the tangent
+			// normalise(t-n*dot(n,t))
+
+			// @note what's happenin'
+
+			float3 t_i;
+			t_i.x = n.x;
+			t_i.y = n.y;
+			t_i.z = n.z;
+
+
+			float n_dot_t = M_DOT3(n,t);
+			mul_scalar(&t_i, n_dot_t);
+			float3 t_minus_n_dot_t;
+			M_SUB3(t_minus_n_dot_t, t, t_i);
+			M_NORMALIZE3(t_i, t_minus_n_dot_t);
+
+			// Get determinant of TBN 3x3 Matrix by using the dot*cross method
+			float3 cross_n_t;
+			M_CROSS3(cross_n_t, n, t);
+			float det = M_DOT3(cross_n_t, n);
+
+			if (det < 0.0) {
+				det = -1.0f;
+			} else {
+				det = 1.0f;
+			}
+
+			tangents[i * 4 + 0] = (GLfloat)t_i.x;
+			tangents[i * 4 + 1] = (GLfloat)t_i.y;
+			tangents[i * 4 + 2] = (GLfloat)t_i.z;
+			tangents[i * 4 + 3] = (GLfloat)det;
+
+			
 		}
 	}
 
@@ -230,7 +305,22 @@ aiProcess_OptimizeMeshes);
 	}
 
 	if (mesh->HasTangentsAndBitangents()){
-		// @missing
+		GLuint vbo;
+		glGenBuffers(1, &vbo);
+		glBindBuffer(GL_ARRAY_BUFFER, vbo);
+		glBufferData(
+			GL_ARRAY_BUFFER,
+			4 * (*point_count) * sizeof(GLfloat),
+			tangents,
+			GL_STATIC_DRAW);
+
+		glVertexAttribPointer(3, 4, GL_FLOAT, GL_FALSE, 0, NULL);
+		glEnableVertexAttribArray(3);
+
+		printf("VertexAttribArray 3 -> TangentsAndBitangents\n");
+
+		// Free temporary local memory;
+		free(tangents);
 	}
 
 	glBindVertexArray(0);
@@ -265,7 +355,7 @@ GLuint compile_shader(GLenum type, const char *src) {
     return shader;
 }
 
-int compile_shader_program(const char* str_vert_shader, const char* str_frag_shader, const char* attrib_name_0, const char* attrib_name_1, const char* attrib_name_2) {
+int compile_shader_program(const char* str_vert_shader, const char* str_frag_shader, const char* attrib_name_0, const char* attrib_name_1, const char* attrib_name_2, const char* attrib_name_3) {
     GLuint vert_shader;
     GLuint frag_shader;
     GLuint prog_object;
@@ -301,6 +391,11 @@ int compile_shader_program(const char* str_vert_shader, const char* str_frag_sha
     if (attrib_name_2 != NULL) {
         printf("Binding attrib 2 ---> %s\n", attrib_name_2);
         glBindAttribLocation(prog_object, 2, attrib_name_2);
+    }
+
+    if (attrib_name_3 != NULL) {
+        printf("Binding attrib 3 ---> %s\n", attrib_name_3);
+        glBindAttribLocation(prog_object, 3, attrib_name_3);
     }
 
     gp_log("Linking shader program");

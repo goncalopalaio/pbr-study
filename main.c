@@ -38,13 +38,10 @@
 
 #define WIN GLFWwindow
 
-int k_left_counter = 0;
-int k_down_counter = 0;
-int k_right_counter = 0;
-int k_a_counter = 0;
-int k_s_counter = 0;
-int k_d_counter = 0;
-int k_r_switch = 1;
+float counter_x_axis = 0;
+float counter_y_axis = 0;
+float counter_z_axis = 0;
+int frame = 0;
 
 void windowclose_callback(WIN * window);
 void windowsize_callback(WIN * window, int width, int height);
@@ -66,17 +63,24 @@ typedef struct Camera {
 
 void load_texture(const char* file, GLuint* tex) {
 	unsigned char * data;
-    int width = 256;
-    int height = 256;
-    int bitdepth = 4;
+    int width = 0;
+    int height = 0;
+    int bitdepth = 0;
     GLuint texture;
     data = stbi_load(file, &width, &height, &bitdepth, 0);
+    log("load_texture: %s w: %d h: %d bitdepth: %d\n", file, width, height, bitdepth);
     // Create one OpenGL texture
     glGenTextures(1, tex);
 
     glBindTexture(GL_TEXTURE_2D, *tex);
 
-    glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    if (bitdepth <= 1) {
+    	glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, width, height, 0, GL_RED, GL_UNSIGNED_BYTE, data);
+    } else if (bitdepth == 3) {
+		glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, width, height, 0, GL_RGB, GL_UNSIGNED_BYTE, data);
+    } else {
+    	glTexImage2D(GL_TEXTURE_2D, 0,GL_RGBA, width, height, 0, GL_RGBA, GL_UNSIGNED_BYTE, data);
+    }
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
@@ -85,8 +89,14 @@ void load_texture(const char* file, GLuint* tex) {
 }
 
 void update_camera(Camera* cam, float* view_matrix) {
-    set_float3(&(cam->position), k_left_counter+1, k_down_counter+0, k_right_counter+1);
-    set_float3(&(cam->look_at_point), k_a_counter + 0, k_s_counter + 0, k_d_counter + 0);
+	float3 offset;
+
+    float rads = counter_x_axis * 8 + (frame/50.0f);
+	set_float3(&offset, 1.9*cos(rads), 1 + counter_y_axis * 100, 1.9*sin(rads));
+	
+
+    set_float3(&(cam->position), offset.x, offset.y, offset.z);
+    set_float3(&(cam->look_at_point), 0, 0,  0);
 
 	set_float3(&(cam->direction), 
 									cam->look_at_point.x - cam->position.x,
@@ -157,23 +167,41 @@ BOOL should_exit_gameplay_loop() {
 
 GLuint load_model_shaders() {
 	char* str_vert = gp_read_entire_file_alloc("shaders/model_vertex.glsl");
-	char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment.glsl");
+	char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment_pbr_1.glsl");
     GLuint program = compile_shader_program(str_vert,str_frag,
-    													  "position", "normal", "uv");
+    													  "position", "normal", "uv", "tangents");
     free(str_vert);
     free(str_frag);
 
     return program;
 }
+
 void gameplay_loop(int w, int h) {
 	char* debug_string = (char*) malloc(200 * sizeof(char));
 
 	GLuint model_vao;
     int model_point_count = 0;
-    assert(load_mesh("models/cube.obj", &model_vao, &model_point_count));
+    assert(load_mesh("models/round.obj", &model_vao, &model_point_count));
 
     GLuint model_texture;
     load_texture("textures/texture_3.png", &model_texture);
+
+	GLuint pbr_albedomap_texture;
+	GLuint pbr_normalmap_texture;
+	GLuint pbr_metallicmap_texture;
+	GLuint pbr_roughnessmap_texture;
+	GLuint pbr_aomap_texture;
+
+	log("Loading PBR assets\n");
+	load_texture("textures/pbr/wall/albedo.png", &pbr_albedomap_texture);
+	load_texture("textures/pbr/wall/normal.png", &pbr_normalmap_texture);
+	load_texture("textures/pbr/wall/metallic.png", &pbr_metallicmap_texture);
+	load_texture("textures/pbr/wall/roughness.png", &pbr_roughnessmap_texture);
+	load_texture("textures/pbr/wall/ao.png", &pbr_aomap_texture);
+
+	int max_texture_units = 0;
+	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &max_texture_units);
+	log("This HW supports: %d texture image units", max_texture_units);
 
 	float view_matrix[] = M_MAT4_IDENTITY();
 	float projection_matrix[] = M_MAT4_IDENTITY();
@@ -185,31 +213,41 @@ void gameplay_loop(int w, int h) {
     Camera* camera = (Camera*) malloc(sizeof(Camera));
    	update_camera(camera, view_matrix);
 
+    float camera_world[3];
+
 	float model_matrix[] = M_MAT4_IDENTITY();
 	float model_scale_matrix[] = M_MAT4_IDENTITY();
 	float model_rotation_matrix[] = M_MAT4_IDENTITY();
 	float3 model_scale;
-	set_float3(&model_scale, 1,1,1);
+	set_float3(&model_scale,0.8,0.8,0.8);
 	m_mat4_scale(model_scale_matrix, &model_scale);
 
 	GLuint model_program = load_model_shaders();
 
+    GLuint loc_time = glGetUniformLocation(model_program, "u_time");
+    GLuint loc_camera_world = glGetUniformLocation(model_program, "u_camera_world");
 	GLuint loc_model_matrix = glGetUniformLocation(model_program, "u_model_matrix");
     GLuint loc_view_matrix = glGetUniformLocation(model_program, "u_view_matrix");
     GLuint loc_projecion_matrix = glGetUniformLocation(model_program, "u_projection_matrix");
     GLuint loc_texture_0 = glGetUniformLocation(model_program, "u_texture");
 
+    GLuint loc_pbr_albedomap = glGetUniformLocation(model_program, "u_albedoMap");
+    GLuint loc_pbr_normalmap = glGetUniformLocation(model_program, "u_normalMap");
+    GLuint loc_pbr_metallicmap = glGetUniformLocation(model_program, "u_metallicMap");
+    GLuint loc_pbr_roughnessmap = glGetUniformLocation(model_program, "u_roughnessMap");
+    GLuint loc_pbr_aomap = glGetUniformLocation(model_program, "u_aoMap");
+
 	glEnable(GL_DEPTH_TEST);
-    glClearColor(0.3f, 0.3f, 0.3f, 1.0f);
+    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
 	glViewport(0, 0, w, h);
-	int frame = 0;
+	
     while(!should_exit_gameplay_loop()) {
     	frame_timer();
     	glClear(GL_COLOR_BUFFER_BIT|GL_DEPTH_BUFFER_BIT);
 
     	update_camera(camera, view_matrix);
 
-		m_mat4_rotation_axis(model_rotation_matrix, &Y_AXIS, 0.001 * frame);		
+		m_mat4_rotation_axis(model_rotation_matrix, &Y_AXIS, 0.00001 * frame);		
 		m_mat4_mul(model_matrix, model_scale_matrix, model_rotation_matrix);
 
     	{
@@ -217,9 +255,35 @@ void gameplay_loop(int w, int h) {
 
 			glActiveTexture(GL_TEXTURE0);
 			glBindTexture(GL_TEXTURE_2D, model_texture);
-			glUniform1i(loc_texture_0, 0); // note: not being used
+			glUniform1i(loc_texture_0, 0);
 
-			glUniformMatrix4fv(loc_model_matrix, 1, GL_FALSE, model_matrix);
+			glActiveTexture(GL_TEXTURE1);
+			glBindTexture(GL_TEXTURE_2D, pbr_albedomap_texture);
+			glUniform1i(loc_pbr_albedomap, 1);
+
+			glActiveTexture(GL_TEXTURE2);
+			glBindTexture(GL_TEXTURE_2D, pbr_normalmap_texture);
+			glUniform1i(loc_pbr_normalmap, 2);
+
+			glActiveTexture(GL_TEXTURE3);
+			glBindTexture(GL_TEXTURE_2D, pbr_metallicmap_texture);
+			glUniform1i(loc_pbr_metallicmap, 3);
+
+			glActiveTexture(GL_TEXTURE4);
+			glBindTexture(GL_TEXTURE_2D, pbr_roughnessmap_texture);
+			glUniform1i(loc_pbr_roughnessmap, 4);
+
+			glActiveTexture(GL_TEXTURE5);
+			glBindTexture(GL_TEXTURE_2D, pbr_aomap_texture);
+			glUniform1i(loc_pbr_aomap, 5);
+
+
+            float time =  frame/500.0f;
+            glUniform1f(loc_time, time);
+            copy_to_arr(camera_world, &camera->position);
+            glUniformMatrix3fv(loc_camera_world, 1, GL_FALSE, camera_world);
+
+        	glUniformMatrix4fv(loc_model_matrix, 1, GL_FALSE, model_matrix);
 			glUniformMatrix4fv(loc_view_matrix, 1, GL_FALSE, view_matrix);
 			glUniformMatrix4fv(loc_projecion_matrix, 1, GL_FALSE, projection_matrix);
 			glBindVertexArray(model_vao);
@@ -230,24 +294,18 @@ void gameplay_loop(int w, int h) {
 	    	float offset[2] = {15.0, -15.0};
 			float font_size = 18.0;
 			float width, height;
-			//sprintf(debug_string, "Look at the cat\n%.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
-			//sprintf(debug_string, "Look at the cat\n%.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
-			sprintf(debug_string, "%s", "");
+			//sprintf(debug_string, "-> %.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
 			if (filewatcher_context->files_changed > 0) {
-				sprintf(debug_string, "File changed: %d \nlatest_filename %s",filewatcher_context->files_changed, filewatcher_context->latest_filename);
 				filewatcher_context->files_changed = 0;
 
 				printf("Recompiling model shader\n");
-
 				GLuint new_program = load_model_shaders();
 				if (new_program != 0) {
 					printf("Replacing model shaders\n");
 					model_program = new_program;
 				} else {
 					printf("\n\n\n\nERROR replacing shaders\n Keeping the old one for now\n\n\n\n");
-
 				}
-
 			}
 			mv_ef_string_dimensions(debug_string, &width, &height, font_size); // for potential alignment
 			mv_ef_draw(debug_string, NULL, offset, font_size);
@@ -271,44 +329,46 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	BOOL pressed = (action == GLFW_PRESS);
 	BOOL released = (action == GLFW_RELEASE);
 
-	int increment = 10 * k_r_switch;
+	float increment = 0.005;
 
     switch(key) {
-    	case GLFW_KEY_R:
-    		k_r_switch = 1 - k_r_switch;
-    		break;
         case GLFW_KEY_RIGHT:
-        	log("GLFW_KEY_RIGHT\n");
-        	k_right_counter+=increment;
         break;
         case GLFW_KEY_LEFT:
-        	log("GLFW_KEY_LEFT\n");
-        	k_left_counter+=increment;
         break;
         case GLFW_KEY_UP:
-        	log("GLFW_KEY_UP\n");
         break;
         case GLFW_KEY_DOWN:
-        	log("GLFW_KEY_DOWN\n");
-        	k_down_counter+=increment;
         break;
         case GLFW_KEY_A:
-        	log("GLFW_KEY_A\n");
-        	k_a_counter+=increment;
-        break;
-        case GLFW_KEY_S:
-        	log("GLFW_KEY_S\n");
-        	k_s_counter+=increment;
+        	counter_x_axis -= increment;
+        	log("- x_axis\n");
         break;
         case GLFW_KEY_D:
-        	log("GLFW_KEY_DOWN\n");
-        	k_d_counter+=increment;
+        	counter_x_axis += increment;
+        	log("+ x_axis\n");
+        break;
+        case GLFW_KEY_W:
+        	counter_z_axis -= increment;
+        	log("- z_axis\n");
+        break;
+        case GLFW_KEY_S:
+        	counter_z_axis += increment;
+        	log("+ z_axis\n");
+        break;
+        case GLFW_KEY_Q:
+        	counter_y_axis -= increment;
+        	log("- y_axis\n");
+        break;
+        case GLFW_KEY_E:
+        	counter_y_axis += increment;
+        	log("+ y_axis\n");
         break;
         default:
         	log("key %d not mapped directly\n", key);
     }
 
-	if(key == GLFW_KEY_ESCAPE || key == GLFW_KEY_Q) {
+	if(key == GLFW_KEY_ESCAPE) {
         glfwSetWindowShouldClose(window, GL_TRUE);
     }
 }
@@ -320,8 +380,8 @@ void error_callback(int error, const char* description) {
 }
 
 int main(int argc, char const *argv[]) {
-	int w = 600;
-	int h = 400;
+	int w = 1000;
+	int h = 800;
 
 	init(w, h);
 
