@@ -17,6 +17,41 @@ void gp_log(char *s);
 void gp_log_float3(char *s, float3 f);
 void gp_log_matrix(char*name, float matrix[]);
 
+////////////////////////////////////////////////////
+// Operators
+float3 operator+(float3 lhs, const float3& rhs) { 
+	M_ADD3(lhs, lhs, rhs);
+	return lhs;
+}
+
+float3 operator-(float3 lhs, const float3& rhs) { 
+	M_SUB3(lhs, lhs, rhs);
+	return lhs;
+}
+
+float3 operator*(float3 lhs, const float& rhs) { 
+	lhs.x *=rhs;
+	lhs.y *=rhs;
+	lhs.z *=rhs; 
+
+	return lhs;
+}
+
+float3 operator+(float3 lhs, const float& rhs) { 
+	lhs.x +=rhs;
+	lhs.y +=rhs;
+	lhs.z +=rhs; 
+
+	return lhs;
+}
+
+float3 operator-(float3 lhs, const float& rhs) { 
+	lhs.x +=rhs;
+	lhs.y +=rhs;
+	lhs.z +=rhs; 
+
+	return lhs;
+}
 
 ////////////////////////////////////////////////////
 // float3 extensions
@@ -208,17 +243,13 @@ aiProcess_CalcTangentSpace);
 			set_float3(&n, normal->x, normal->y, normal->z);
 
 
-			// Orthogonalize and normalise the tangent
-			// normalise(t-n*dot(n,t))
-
-			// @note what's happenin'
-
+			// Orthogonalize and normalise the tangent = normalise(t-n*dot(n,t))
 			float3 t_i;
 			t_i.x = n.x;
 			t_i.y = n.y;
 			t_i.z = n.z;
 
-
+			float det = 1.0;
 			float n_dot_t = M_DOT3(n,t);
 			mul_scalar(&t_i, n_dot_t);
 			float3 t_minus_n_dot_t;
@@ -228,7 +259,7 @@ aiProcess_CalcTangentSpace);
 			// Get determinant of TBN 3x3 Matrix by using the dot*cross method
 			float3 cross_n_t;
 			M_CROSS3(cross_n_t, n, t);
-			float det = M_DOT3(cross_n_t, n);
+			det = M_DOT3(cross_n_t, n);
 
 			if (det < 0.0) {
 				det = -1.0f;

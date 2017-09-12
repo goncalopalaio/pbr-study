@@ -1,0 +1,22 @@
+# Blender MTL File: 'PictureFrame.blend'
+# Material Count: 2
+
+newmtl Frame
+Ns 103.921569
+Ka 1.000000 1.000000 1.000000
+Kd 0.102588 0.043028 0.017804
+Ks 0.145570 0.145570 0.145570
+Ke 0.000000 0.000000 0.000000
+Ni 1.000000
+d 1.000000
+illum 2
+map_Kd /Users/goncalopalaio/Downloads/pictureframe/Normal.png
+map_Bump -bm 0.090000 /Users/goncalopalaio/Downloads/pictureframe/Normal.png
+
+newmtl None
+Ns 0
+Ka 0.000000 0.000000 0.000000
+Kd 0.8 0.8 0.8
+Ks 0.8 0.8 0.8
+d 1
+illum 2

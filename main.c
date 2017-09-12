@@ -38,9 +38,12 @@
 
 #define WIN GLFWwindow
 
-float counter_x_axis = 0;
-float counter_y_axis = 0;
-float counter_z_axis = 0;
+float rads_camera_x = M_PI/2.0;
+float distance_camera = 2.5;
+float rads_light_x = 1.0;
+float distance_light = 1.0;
+float3 light_dir = {1.0,1.0,1.0};
+
 int frame = 0;
 
 void windowclose_callback(WIN * window);
@@ -61,13 +64,22 @@ typedef struct Camera {
     float3 up;
 } Camera;
 
+typedef struct Arrow {
+    float3 a;
+    float3 b;
+    float3 c;
+    float3 a2;
+    float3 b2;
+    float3 c2;
+} Arrow;
+
 void load_texture(const char* file, GLuint* tex) {
 	unsigned char * data;
     int width = 0;
     int height = 0;
     int bitdepth = 0;
     GLuint texture;
-    data = stbi_load(file, &width, &height, &bitdepth, 0);
+    data = stbi_load(file, &width, &height, &bitdepth, STBI_rgb_alpha);
     log("load_texture: %s w: %d h: %d bitdepth: %d\n", file, width, height, bitdepth);
     // Create one OpenGL texture
     glGenTextures(1, tex);
@@ -85,18 +97,15 @@ void load_texture(const char* file, GLuint* tex) {
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
 
 
+
     free(data);
 }
 
 void update_camera(Camera* cam, float* view_matrix) {
-	float3 offset;
 
-    float rads = counter_x_axis * 8 + (frame/50.0f);
-	set_float3(&offset, 1.9*cos(rads), 1 + counter_y_axis * 100, 1.9*sin(rads));
-	
 
-    set_float3(&(cam->position), offset.x, offset.y, offset.z);
-    set_float3(&(cam->look_at_point), 0, 0,  0);
+    set_float3(&(cam->position), distance_camera*cos(rads_camera_x), 0.5,distance_camera*sin(rads_camera_x));
+    set_float3(&(cam->look_at_point), 0, 0.5,  0);
 
 	set_float3(&(cam->direction), 
 									cam->look_at_point.x - cam->position.x,
@@ -165,11 +174,179 @@ BOOL should_exit_gameplay_loop() {
 	return glfwWindowShouldClose(window);
 }
 
-GLuint load_model_shaders() {
-	char* str_vert = gp_read_entire_file_alloc("shaders/model_vertex.glsl");
-	char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment_pbr_1.glsl");
+GLuint load_arrow_shaders() {
+    char* str_vert = gp_read_entire_file_alloc("shaders/arrow_vertex.glsl");
+    char* str_frag = gp_read_entire_file_alloc("shaders/arrow_fragment.glsl");
     GLuint program = compile_shader_program(str_vert,str_frag,
-    													  "position", "normal", "uv", "tangents");
+                                                          "position", NULL, NULL, NULL);
+    free(str_vert);
+    free(str_frag);
+
+    return program;
+}
+
+void load_arrow_mesh(GLuint* vao, Arrow* arr, int len, int* arrows_point_count) {
+    assert(arr != NULL);
+    assert(len != 0);
+
+    int elems_arrow = 6;
+
+    int floats_per_arrow = 3 * elems_arrow;
+
+    *arrows_point_count = floats_per_arrow * len;
+
+    // Generate a VAO
+    glGenVertexArrays(1, vao);
+    glBindVertexArray(*vao);
+
+    GLfloat* points = NULL;
+    GLfloat* colors = NULL;
+
+    //printf("Arrows: loading positions\n");
+    points = (GLfloat*) malloc(len * elems_arrow * 3 * sizeof(GLfloat));
+    for (int i = 0; i < len; ++i) {
+        Arrow* arrow = &(arr[i]);
+
+        points[i * floats_per_arrow + 0] = (GLfloat)arrow->a.x;
+        points[i * floats_per_arrow + 1] = (GLfloat)arrow->a.y;
+        points[i * floats_per_arrow + 2] = (GLfloat)arrow->a.z;
+        points[i * floats_per_arrow + 3] = (GLfloat)arrow->b.x;
+        points[i * floats_per_arrow + 4] = (GLfloat)arrow->b.y;
+        points[i * floats_per_arrow + 5] = (GLfloat)arrow->b.z;
+        points[i * floats_per_arrow + 6] = (GLfloat)arrow->c.x;
+        points[i * floats_per_arrow + 7] = (GLfloat)arrow->c.y;
+        points[i * floats_per_arrow + 8] = (GLfloat)arrow->c.z;
+
+        points[i * floats_per_arrow + 9] =  (GLfloat)arrow->a2.x;
+        points[i * floats_per_arrow + 10] = (GLfloat)arrow->a2.y;
+        points[i * floats_per_arrow + 11] = (GLfloat)arrow->a2.z;
+        points[i * floats_per_arrow + 12] = (GLfloat)arrow->b2.x;
+        points[i * floats_per_arrow + 13] = (GLfloat)arrow->b2.y;
+        points[i * floats_per_arrow + 14] = (GLfloat)arrow->b2.z;
+        points[i * floats_per_arrow + 15] = (GLfloat)arrow->c2.x;
+        points[i * floats_per_arrow + 16] = (GLfloat)arrow->c2.y;
+        points[i * floats_per_arrow + 17] = (GLfloat)arrow->c2.z;
+    }
+
+    float3 r = {1,0,0};
+    float3 g = {0,1,0};
+    float3 b = {0,0,1};
+    //printf("Arrows: loading colors\n");
+    colors = (GLfloat*) malloc(len * elems_arrow * 3 * sizeof(GLfloat));
+    for (int i = 0; i < len; ++i) {
+     
+        colors[i * floats_per_arrow + 0] = (GLfloat)g.x;
+        colors[i * floats_per_arrow + 1] = (GLfloat)g.y;
+        colors[i * floats_per_arrow + 2] = (GLfloat)g.z;
+        colors[i * floats_per_arrow + 3] = (GLfloat)g.x;
+        colors[i * floats_per_arrow + 4] = (GLfloat)g.y;
+        colors[i * floats_per_arrow + 5] = (GLfloat)g.z;
+        colors[i * floats_per_arrow + 6] = (GLfloat)g.x;
+        colors[i * floats_per_arrow + 7] = (GLfloat)g.y;
+        colors[i * floats_per_arrow + 8] = (GLfloat)g.z;
+
+        colors[i * floats_per_arrow + 9] =  (GLfloat)r.x;
+        colors[i * floats_per_arrow + 10] = (GLfloat)r.y;
+        colors[i * floats_per_arrow + 11] = (GLfloat)r.z;
+        colors[i * floats_per_arrow + 12] = (GLfloat)r.x;
+        colors[i * floats_per_arrow + 13] = (GLfloat)r.y;
+        colors[i * floats_per_arrow + 14] = (GLfloat)r.z;
+        colors[i * floats_per_arrow + 15] = (GLfloat)r.x;
+        colors[i * floats_per_arrow + 16] = (GLfloat)r.y;
+        colors[i * floats_per_arrow + 17] = (GLfloat)r.z;
+    }
+    
+    // Copy mesh data to VBO
+    {
+        GLuint vbo;
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            3 * (len * elems_arrow) * sizeof(GLfloat),
+            points,
+            GL_STATIC_DRAW);
+
+        glVertexAttribPointer(0,3,GL_FLOAT, GL_FALSE, 0, NULL);
+        glEnableVertexAttribArray(0);
+        free(points);
+        //printf("Arrows: VertexAttribArray 0 -> Positions\n");
+    }
+        
+
+    {
+        GLuint vbo;
+        glGenBuffers(1, &vbo);
+        glBindBuffer(GL_ARRAY_BUFFER, vbo);
+        glBufferData(
+            GL_ARRAY_BUFFER,
+            3 * (len * elems_arrow) * sizeof(GLfloat),
+        colors,
+        GL_STATIC_DRAW);
+
+        glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, 0, NULL);
+        glEnableVertexAttribArray(1);
+        free(colors);
+        //printf("Arrows: VertexAttribArray 1 -> Colors\n");
+    }
+
+    glBindVertexArray(0);
+    //printf("Arrows: Mesh loaded\n");
+}
+
+void set_arrow(Arrow* dest, float3 a, float3 b) {
+    float scale = 0.03;
+
+    float3 dir = b - a;
+    float3 normal;
+
+
+    float dot = M_DOT3(dir,Z_AXIS);
+    if(dot != -1.0 && dot != 1.0) {
+        M_CROSS3(normal, dir, Z_AXIS);
+    } else {
+        M_CROSS3(normal, dir, Y_AXIS);
+    }
+    
+    M_NORMALIZE3(dir, dir);
+    M_NORMALIZE3(normal, normal);
+
+    normal = normal * scale;
+    dir = dir * scale;
+
+
+    dest->a = (normal + a);
+    dest->b = ((normal * -1.0) + a);
+    dest->c = b;
+
+    float3 ortho;
+    M_CROSS3(ortho, dir, normal);
+    M_NORMALIZE3(ortho , ortho);    
+    ortho = ortho * scale;
+    dest->a2 = (ortho + a);
+    dest->b2 = ((ortho * -1.0) + a);
+    dest->c2 = b;
+}
+
+#define NUMBER_ARROWS 4
+void update_arrows(Arrow* arrows, int number_arrows, Camera camera, float3* lights, int number_lights) {
+    assert(arrows != NULL);
+    assert(number_arrows == NUMBER_ARROWS);
+
+    int idx = 0;
+    set_arrow(&arrows[idx++], ORIGIN, X_AXIS);
+    set_arrow(&arrows[idx++], ORIGIN, Y_AXIS);
+    set_arrow(&arrows[idx++], ORIGIN, Z_AXIS);    
+    set_arrow(&arrows[idx++], ORIGIN, light_dir);
+}
+
+GLuint load_model_shaders() {
+	//char* str_vert = gp_read_entire_file_alloc("shaders/model_vertex_normal_mapping_2.glsl");
+	//char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment_normal_mapping_2.glsl");
+    char* str_vert = gp_read_entire_file_alloc("shaders/model_vertex_pbr_1.glsl");
+    char* str_frag = gp_read_entire_file_alloc("shaders/model_fragment_pbr_1.glsl");
+    GLuint program = compile_shader_program(str_vert,str_frag,
+    													  "position", "normal", "uv", "tangent");
     free(str_vert);
     free(str_frag);
 
@@ -181,7 +358,10 @@ void gameplay_loop(int w, int h) {
 
 	GLuint model_vao;
     int model_point_count = 0;
+    //assert(load_mesh("models/chest/Chest.obj", &model_vao, &model_point_count));
+    //assert(load_mesh("models/FireHydrant/FireHydrantMesh.obj", &model_vao, &model_point_count));
     assert(load_mesh("models/round.obj", &model_vao, &model_point_count));
+    
 
     GLuint model_texture;
     load_texture("textures/texture_3.png", &model_texture);
@@ -192,13 +372,56 @@ void gameplay_loop(int w, int h) {
 	GLuint pbr_roughnessmap_texture;
 	GLuint pbr_aomap_texture;
 
-	log("Loading PBR assets\n");
-	load_texture("textures/pbr/wall/albedo.png", &pbr_albedomap_texture);
-	load_texture("textures/pbr/wall/normal.png", &pbr_normalmap_texture);
-	load_texture("textures/pbr/wall/metallic.png", &pbr_metallicmap_texture);
-	load_texture("textures/pbr/wall/roughness.png", &pbr_roughnessmap_texture);
-	load_texture("textures/pbr/wall/ao.png", &pbr_aomap_texture);
+    
+    int tex_int = 5;
+    switch (tex_int) {
+        case 0:
+            load_texture("models/FireHydrant/fire_hydrant_Base_Color.png", &pbr_albedomap_texture);
+            load_texture("models/FireHydrant/fire_hydrant_Normal_OpenGL.png",&pbr_normalmap_texture);
+            load_texture("models/FireHydrant/fire_hydrant_Roughness.png", &pbr_roughnessmap_texture);
+            load_texture("models/FireHydrant/fire_hydrant_Metallic.png", &pbr_metallicmap_texture);
+            load_texture("models/FireHydrant/fire_hydrant_Mixed_AO.png", &pbr_aomap_texture);
+            break;
+        case 1:
+            load_texture("models/chest/chest_albedo.png", &pbr_albedomap_texture);
+            load_texture("models/chest/chest_normal.png", &pbr_normalmap_texture);
+            load_texture("models/chest/chest_metalness.png", &pbr_metallicmap_texture);
+            load_texture("models/chest/chest_roughness.png", &pbr_roughnessmap_texture);
+            load_texture("models/chest/chest_ao.png", &pbr_aomap_texture);
+            break;
+        case 2:
+            load_texture("textures/pbr/scuffed-plastic/albedo.png", &pbr_albedomap_texture);
+            load_texture("textures/pbr/scuffed-plastic/normal.png",&pbr_normalmap_texture);
+            load_texture("textures/pbr/scuffed-plastic/roughness.png", &pbr_roughnessmap_texture);
+            load_texture("textures/pbr/scuffed-plastic/metal.png", &pbr_metallicmap_texture);
+            //load_texture("textures/pbr/scuffed-plastic_AO.png", &pbr_aomap_texture);
+            break;
+        case 3:
+            load_texture("textures/pbr/bamboo-wood-semigloss/albedo.png", &pbr_albedomap_texture);
+            load_texture("textures/pbr/bamboo-wood-semigloss/normal.png",&pbr_normalmap_texture);
+            load_texture("textures/pbr/bamboo-wood-semigloss/roughness.png", &pbr_roughnessmap_texture);
+            load_texture("textures/pbr/bamboo-wood-semigloss/metal.png", &pbr_metallicmap_texture);
+            //load_texture("textures/pbr/scuffed-plastic_AO.png", &pbr_aomap_texture);
+            break;
+        case 4:
+            load_texture("textures/pbr/rustediron-streaks/albedo.png", &pbr_albedomap_texture);
+            load_texture("textures/pbr/rustediron-streaks/normal.png",&pbr_normalmap_texture);
+            load_texture("textures/pbr/rustediron-streaks/roughness.png", &pbr_roughnessmap_texture);
+            load_texture("textures/pbr/rustediron-streaks/metal.png", &pbr_metallicmap_texture);
+            //load_texture("textures/pbr/scuffed-plastic_AO.png", &pbr_aomap_texture);
+            break;
+        case 5:
+            load_texture("textures/pbr/wall/albedo.png", &pbr_albedomap_texture);
+            load_texture("textures/pbr/wall/normal.png",&pbr_normalmap_texture);
+            load_texture("textures/pbr/wall/roughness.png", &pbr_roughnessmap_texture);
+            load_texture("textures/pbr/wall/metallic.png", &pbr_metallicmap_texture);
+            load_texture("textures/pbr/wall/ao.png", &pbr_aomap_texture);
+            break;
+        default:
+            printf("wrong tex_int\n");
 
+    }
+    
 	int max_texture_units = 0;
 	glGetIntegerv(GL_MAX_TEXTURE_IMAGE_UNITS, &max_texture_units);
 	log("This HW supports: %d texture image units", max_texture_units);
@@ -213,8 +436,6 @@ void gameplay_loop(int w, int h) {
     Camera* camera = (Camera*) malloc(sizeof(Camera));
    	update_camera(camera, view_matrix);
 
-    float camera_world[3];
-
 	float model_matrix[] = M_MAT4_IDENTITY();
 	float model_scale_matrix[] = M_MAT4_IDENTITY();
 	float model_rotation_matrix[] = M_MAT4_IDENTITY();
@@ -224,7 +445,23 @@ void gameplay_loop(int w, int h) {
 
 	GLuint model_program = load_model_shaders();
 
+
+    GLuint arrow_program = load_arrow_shaders();
+    GLuint arrow_vao;
+    
+    int number_arrows = NUMBER_ARROWS;
+    Arrow* arrows = (Arrow*) malloc(number_arrows * sizeof(Arrow));
+    
+    update_arrows(arrows, number_arrows, *camera, NULL, 0);
+    int arrows_point_count = 0;
+    load_arrow_mesh(&arrow_vao, arrows, number_arrows, &arrows_point_count);
+
+    GLuint loc_arrow_model_matrix = glGetUniformLocation(arrow_program, "u_model_matrix");
+    GLuint loc_arrow_view_matrix = glGetUniformLocation(arrow_program, "u_view_matrix");
+    GLuint loc_arrow_projecion_matrix = glGetUniformLocation(arrow_program, "u_projection_matrix");
+
     GLuint loc_time = glGetUniformLocation(model_program, "u_time");
+    GLuint loc_light = glGetUniformLocation(model_program, "u_light");
     GLuint loc_camera_world = glGetUniformLocation(model_program, "u_camera_world");
 	GLuint loc_model_matrix = glGetUniformLocation(model_program, "u_model_matrix");
     GLuint loc_view_matrix = glGetUniformLocation(model_program, "u_view_matrix");
@@ -238,7 +475,7 @@ void gameplay_loop(int w, int h) {
     GLuint loc_pbr_aomap = glGetUniformLocation(model_program, "u_aoMap");
 
 	glEnable(GL_DEPTH_TEST);
-    glClearColor(0.5f, 0.5f, 0.5f, 1.0f);
+    glClearColor(0.3f, 0.5f, 0.5f, 1.0f);
 	glViewport(0, 0, w, h);
 	
     while(!should_exit_gameplay_loop()) {
@@ -247,10 +484,14 @@ void gameplay_loop(int w, int h) {
 
     	update_camera(camera, view_matrix);
 
+        update_arrows(arrows, number_arrows, *camera, NULL, 0);
+        load_arrow_mesh(&arrow_vao, arrows, number_arrows, &arrows_point_count);
+
+
 		m_mat4_rotation_axis(model_rotation_matrix, &Y_AXIS, 0.00001 * frame);		
 		m_mat4_mul(model_matrix, model_scale_matrix, model_rotation_matrix);
 
-    	{
+    	if(1){
 			glUseProgram(model_program);
 
 			glActiveTexture(GL_TEXTURE0);
@@ -280,8 +521,10 @@ void gameplay_loop(int w, int h) {
 
             float time =  frame/500.0f;
             glUniform1f(loc_time, time);
-            copy_to_arr(camera_world, &camera->position);
-            glUniformMatrix3fv(loc_camera_world, 1, GL_FALSE, camera_world);
+
+            sprintf(debug_string, "-> %f %f %f - light %f %f %f",camera->position.x,camera->position.y,camera->position.z, light_dir.x,light_dir.y,light_dir.z);
+            glUniform3f(loc_camera_world,camera->position.x,camera->position.y,camera->position.z );
+            glUniform3f(loc_light, light_dir.x, light_dir.y, light_dir.z);
 
         	glUniformMatrix4fv(loc_model_matrix, 1, GL_FALSE, model_matrix);
 			glUniformMatrix4fv(loc_view_matrix, 1, GL_FALSE, view_matrix);
@@ -290,12 +533,23 @@ void gameplay_loop(int w, int h) {
 			glDrawArrays(GL_TRIANGLES, 0, model_point_count);
     	}
 
+        if (1) {
+            glUseProgram(arrow_program);
+            
+            glUniformMatrix4fv(loc_arrow_model_matrix, 1, GL_FALSE, model_matrix);
+            glUniformMatrix4fv(loc_arrow_view_matrix, 1, GL_FALSE, view_matrix);
+            glUniformMatrix4fv(loc_arrow_projecion_matrix, 1, GL_FALSE, projection_matrix);
+            
+            glBindVertexArray(arrow_vao);
+            glDrawArrays(GL_TRIANGLES, 0, arrows_point_count);
+        }
+
 		if (1){
 	    	float offset[2] = {15.0, -15.0};
 			float font_size = 18.0;
 			float width, height;
 			//sprintf(debug_string, "-> %.1f %.1f %.1f --> %.1f %.1f %.1f",camera->position.x,camera->position.y,camera->position.z,camera->look_at_point.x,camera->look_at_point.y,camera->look_at_point.z);
-			if (filewatcher_context->files_changed > 0) {
+            if (filewatcher_context->files_changed > 0) {
 				filewatcher_context->files_changed = 0;
 
 				printf("Recompiling model shader\n");
@@ -329,44 +583,43 @@ void key_callback(GLFWwindow* window, int key, int scancode, int action, int mod
 	BOOL pressed = (action == GLFW_PRESS);
 	BOOL released = (action == GLFW_RELEASE);
 
-	float increment = 0.005;
-
+	float increment = 0.5;
+    float light_speed = 0.3;
     switch(key) {
         case GLFW_KEY_RIGHT:
+            rads_light_x += light_speed;
         break;
         case GLFW_KEY_LEFT:
+            rads_light_x -= light_speed;
         break;
         case GLFW_KEY_UP:
+            distance_light += light_speed;
         break;
         case GLFW_KEY_DOWN:
+            distance_light -= light_speed;
         break;
         case GLFW_KEY_A:
-        	counter_x_axis -= increment;
+        	rads_camera_x -= increment * 0.1;
         	log("- x_axis\n");
         break;
         case GLFW_KEY_D:
-        	counter_x_axis += increment;
+        	rads_camera_x += increment * 0.1;
         	log("+ x_axis\n");
         break;
-        case GLFW_KEY_W:
-        	counter_z_axis -= increment;
-        	log("- z_axis\n");
-        break;
-        case GLFW_KEY_S:
-        	counter_z_axis += increment;
-        	log("+ z_axis\n");
-        break;
         case GLFW_KEY_Q:
-        	counter_y_axis -= increment;
+        	distance_camera -= increment;
         	log("- y_axis\n");
         break;
         case GLFW_KEY_E:
-        	counter_y_axis += increment;
+        	distance_camera += increment;
         	log("+ y_axis\n");
         break;
         default:
         	log("key %d not mapped directly\n", key);
     }
+
+    light_dir.x = distance_light * cos(rads_light_x);
+    light_dir.z = distance_light * sin(rads_light_x);
 
 	if(key == GLFW_KEY_ESCAPE) {
         glfwSetWindowShouldClose(window, GL_TRUE);
